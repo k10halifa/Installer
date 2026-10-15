@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Shizuku-Installationsprogramm</string>
+    <string name="app_name">installer</string>
 
     <string name="install">Installieren</string>
     <string name="update">Aktualisieren</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">Shizuku ist nicht verfügbar.</string>
     <string name="error_create">Fehler beim Erstellen einer Installationssitzung.</string>
     <string name="error_write">Fehler beim Kopieren der APK.</string>
-    <string name="error_info">Diese Software ist Open Source unter %s.</string>
 </resources>

@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.viewmodel
+package io.i10nstaller.viewmodel
 
 import android.annotation.SuppressLint
 import android.app.Application
@@ -7,8 +7,8 @@ import android.content.pm.PackageInfo
 import androidx.arch.core.executor.ArchTaskExecutor
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
-import io.github.vvb2060.packageinstaller.model.InstallRepository
-import io.github.vvb2060.packageinstaller.model.InstallStage
+import io.i10nstaller.model.InstallRepository
+import io.i10nstaller.model.InstallStage
 
 @SuppressLint("RestrictedApi")
 class InstallViewModel(application: Application) : AndroidViewModel(application) {
@@ -33,12 +33,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     fun initiateInstall(
         setInstaller: Boolean,
+        grantPermissions: Boolean,
+        deleteSource: Boolean,
         commit: Boolean,
         full: Boolean,
         removeSplit: Boolean
     ) {
         executor.executeOnDiskIO {
-            repository.install(setInstaller, commit, full, removeSplit)
+            repository.install(
+                setInstaller,
+                grantPermissions,
+                deleteSource,
+                commit,
+                full,
+                removeSplit
+            )
         }
     }
 

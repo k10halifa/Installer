@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">"Shizuku 安裝器"</string>
+    <string name="app_name">installer</string>
 
     <string name="install">"安裝"</string>
     <string name="update">"更新"</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">"無法使用 Shizuku。"</string>
     <string name="error_create">"無法建立安裝工作階段。"</string>
     <string name="error_write">"無法複製 APK。"</string>
-    <string name="error_info">"此軟體是 %s 授權下的開放原始碼軟體。"</string>
 </resources>

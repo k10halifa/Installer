@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">शिज़ुकु इंस्टॉलर</string>
+    <string name="app_name">installer</string>
 
     <string name="install">इंस्टॉल करें</string>
     <string name="update">अपडेट करें</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">शिज़ुकु अनुपलब्ध है।</string>
     <string name="error_create">इंस्टॉल सत्र बनाने में विफल।</string>
     <string name="error_write">एपीके कॉपी करने में विफल।</string>
-    <string name="error_info">यह सॉफ्टवेयर %s के तहत ओपन सोर्स है।</string>
 </resources>

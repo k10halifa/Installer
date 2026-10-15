@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Trình cài đặt Shizuku</string>
+    <string name="app_name">installer</string>
 
     <string name="install">Cài đặt</string>
     <string name="update">Cập nhật</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">Shizuku không khả dụng.</string>
     <string name="error_create">Không thể tạo phiên cài đặt.</string>
     <string name="error_write">Không thể sao chép apk.</string>
-    <string name="error_info">Phần mềm này là mã nguồn mở theo %s.</string>
 </resources>

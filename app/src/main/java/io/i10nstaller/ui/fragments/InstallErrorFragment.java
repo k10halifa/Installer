@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.ui.fragments;
+package io.i10nstaller.ui.fragments;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -7,12 +7,15 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.widget.CheckBox;
+import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import io.github.vvb2060.packageinstaller.R;
-import io.github.vvb2060.packageinstaller.model.InstallAborted;
+import io.i10nstaller.R;
+import io.i10nstaller.model.InstallAborted;
+import io.i10nstaller.model.InstallOptions;
 import rikka.shizuku.Shizuku;
 
 public class InstallErrorFragment extends BaseDialogFragment {
@@ -29,11 +32,15 @@ public class InstallErrorFragment extends BaseDialogFragment {
     public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
         var code = mAborted.getAbortReason();
         var context = requireContext();
-        return new AlertDialog.Builder(requireContext())
+        var builder = new AlertDialog.Builder(context)
             .setTitle(code == InstallAborted.ABORT_INFO ? R.string.app_name : R.string.error_title)
-            .setIcon(R.drawable.ic_app_icon)
-            .setMessage(getErrorMessage(context, code))
-            .setPositiveButton(android.R.string.ok,
+            .setIcon(R.drawable.ic_app_icon);
+        if (code == InstallAborted.ABORT_INFO) {
+            builder.setView(createOptionsView(context));
+        } else {
+            builder.setMessage(getErrorMessage(context, code));
+        }
+        return builder.setPositiveButton(android.R.string.ok,
                 (dialog, which) -> {
                     cleanAndFinish();
                     if (code == InstallAborted.ABORT_SHIZUKU) {
@@ -72,11 +79,6 @@ public class InstallErrorFragment extends BaseDialogFragment {
                     return context.getString(R.string.error_shizuku_unavailable);
                 }
             }
-            case InstallAborted.ABORT_INFO -> {
-                return getString(R.string.error_info,
-                    context.getString(R.string.license)) + "\n\n" +
-                    context.getString(R.string.copyright);
-            }
         }
         var id = switch (code) {
             case InstallAborted.ABORT_PARSE -> R.string.error_parse;
@@ -87,5 +89,27 @@ public class InstallErrorFragment extends BaseDialogFragment {
             default -> R.string.error_title;
         };
         return context.getString(id);
+    }
+
+    private LinearLayout createOptionsView(Context context) {
+        int padding = (int) (20 * context.getResources().getDisplayMetrics().density);
+        var content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(padding, padding / 2, padding, 0);
+        addOption(context, content, R.string.set_installer, InstallOptions.KEY_SET_INSTALLER);
+        addOption(context, content, R.string.grant_permissions_battery,
+            InstallOptions.KEY_GRANT_PERMISSIONS);
+        addOption(context, content, R.string.delete_apk_after_install, InstallOptions.KEY_DELETE_APK);
+        addOption(context, content, R.string.silent_mode, InstallOptions.KEY_SILENT_MODE);
+        return content;
+    }
+
+    private void addOption(Context context, LinearLayout parent, int label, String key) {
+        var checkbox = new CheckBox(context);
+        checkbox.setText(label);
+        checkbox.setChecked(InstallOptions.getBoolean(context, key, false));
+        checkbox.setOnCheckedChangeListener((button, checked) ->
+            InstallOptions.setBoolean(context, key, checked));
+        parent.addView(checkbox);
     }
 }

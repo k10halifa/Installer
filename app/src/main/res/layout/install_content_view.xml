@@ -26,6 +26,33 @@
             android:layout_marginTop="8dp"
             android:visibility="gone" />
 
+        <CheckBox
+            android:id="@+id/grant_permissions_checkbox"
+            style="@android:style/TextAppearance.Material.Subhead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="-4dp"
+            android:text="@string/grant_permissions_battery"
+            android:visibility="gone" />
+
+        <CheckBox
+            android:id="@+id/delete_apk_checkbox"
+            style="@android:style/TextAppearance.Material.Subhead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="-4dp"
+            android:text="@string/delete_apk_after_install"
+            android:visibility="gone" />
+
+        <CheckBox
+            android:id="@+id/silent_mode_checkbox"
+            style="@android:style/TextAppearance.Material.Subhead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="-4dp"
+            android:text="@string/silent_mode"
+            android:visibility="gone" />
+
         <ProgressBar
             android:id="@+id/progress"
             style="?android:attr/progressBarStyleHorizontal"

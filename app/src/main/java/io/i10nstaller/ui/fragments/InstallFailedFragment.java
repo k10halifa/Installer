@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.ui.fragments;
+package io.i10nstaller.ui.fragments;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -8,8 +8,8 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import io.github.vvb2060.packageinstaller.R;
-import io.github.vvb2060.packageinstaller.model.InstallFailed;
+import io.i10nstaller.R;
+import io.i10nstaller.model.InstallFailed;
 
 public class InstallFailedFragment extends BaseDialogFragment {
 

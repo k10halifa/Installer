@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.ui.fragments;
+package io.i10nstaller.ui.fragments;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -12,7 +12,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.DialogFragment;
 
-import io.github.vvb2060.packageinstaller.R;
+import io.i10nstaller.R;
 
 public class InstallParseFragment extends DialogFragment {
 
@@ -22,6 +22,9 @@ public class InstallParseFragment extends DialogFragment {
     @Override
     public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
         View dialogView = getLayoutInflater().inflate(R.layout.install_content_view, null);
+        dialogView.requireViewById(R.id.grant_permissions_checkbox).setVisibility(View.GONE);
+        dialogView.requireViewById(R.id.delete_apk_checkbox).setVisibility(View.GONE);
+        dialogView.requireViewById(R.id.silent_mode_checkbox).setVisibility(View.GONE);
         ProgressBar progressBar = dialogView.requireViewById(R.id.progress);
         progressBar.setVisibility(View.VISIBLE);
         TextView textView = dialogView.requireViewById(R.id.message);

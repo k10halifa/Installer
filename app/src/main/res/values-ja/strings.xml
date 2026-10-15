@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">"Shizuku インストーラー"</string>
+    <string name="app_name">installer</string>
 
     <string name="install">"インストール"</string>
     <string name="update">"更新"</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">"Shizukuは利用できません。"</string>
     <string name="error_create">"インストールセッションの作成に失敗しました。"</string>
     <string name="error_write">"APKのコピーに失敗しました。"</string>
-    <string name="error_info">"このソフトウェアは%sの下でオープンソースです。"</string>
 </resources>

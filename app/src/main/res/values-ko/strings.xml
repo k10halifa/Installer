@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Shizuku 설치 프로그램</string>
+    <string name="app_name">installer</string>
 
     <string name="install">설치</string>
     <string name="update">업데이트</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">Shizuku를 사용할 수 없습니다.</string>
     <string name="error_create">설치 세션을 만들지 못했습니다.</string>
     <string name="error_write">apk를 복사하지 못했습니다.</string>
-    <string name="error_info">이 소프트웨어는 %s에 따라 오픈 소스입니다.</string>
 </resources>

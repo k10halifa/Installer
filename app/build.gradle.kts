@@ -18,8 +18,9 @@ plugins {
 }
 
 android {
-    namespace = "io.github.vvb2060.packageinstaller"
+    namespace = "io.i10nstaller"
     defaultConfig {
+        applicationId = "io.i10nstaller"
         versionCode = 8
         versionName = "1.7"
         optimization {
@@ -101,7 +102,7 @@ abstract class ClassVisitorFactory : AsmClassVisitorFactory<InstrumentationParam
     }
 
     override fun isInstrumentable(classData: ClassData): Boolean {
-        return classData.className.startsWith("io.github.vvb2060.packageinstaller.model.")
+        return classData.className.startsWith("io.i10nstaller.model.")
     }
 }
 

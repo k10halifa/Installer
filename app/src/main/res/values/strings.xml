@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Shizuku installer</string>
+    <string name="app_name">installer</string>
 
     <string name="install">Install</string>
     <string name="update">Update</string>
@@ -15,6 +15,10 @@
     <string name="parsing">Parsing…</string>
 
     <string name="set_installer">Set installer</string>
+    <string name="grant_permissions_battery">Grant permissions &amp; battery</string>
+    <string name="delete_apk_after_install">Delete APK after install</string>
+    <string name="silent_mode">Silent mode for APK installs</string>
+    <string name="silent_install_failed">Failed Installing</string>
     <string name="uninstall_keep_data">Also uninstall this app but keep data</string>
 
     <string name="package_name">"Package: "</string>
@@ -52,5 +56,4 @@
     <string name="error_shizuku_unavailable">Shizuku is unavailable.</string>
     <string name="error_create">Failed to create a install session.</string>
     <string name="error_write">Failed to copy apk.</string>
-    <string name="error_info">This software is open source under %s.</string>
 </resources>

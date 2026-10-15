@@ -1,7 +1,8 @@
-package io.github.vvb2060.packageinstaller.model
+package io.i10nstaller.model
 
 import android.Manifest
 import android.app.Application
+import android.content.ContentUris
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Intent
@@ -20,6 +21,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.Process
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.system.Os
@@ -28,16 +30,16 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.net.toUri
 import androidx.lifecycle.MutableLiveData
-import io.github.vvb2060.packageinstaller.R
-import io.github.vvb2060.packageinstaller.model.Hook.wrap
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_CLOSE
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_CREATE
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_INFO
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_NOTFOUND
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_PARSE
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_SHIZUKU
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_SPLIT
-import io.github.vvb2060.packageinstaller.model.InstallAborted.Companion.ABORT_WRITE
+import io.i10nstaller.R
+import io.i10nstaller.model.Hook.wrap
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_CLOSE
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_CREATE
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_INFO
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_NOTFOUND
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_PARSE
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_SHIZUKU
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_SPLIT
+import io.i10nstaller.model.InstallAborted.Companion.ABORT_WRITE
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
 import java.io.File
@@ -53,6 +55,10 @@ class InstallRepository(private val context: Application) {
     private var callingUid = Process.INVALID_UID
     private lateinit var intent: Intent
     private var apkLite: ApkLite? = null
+    private var sourceUri: Uri? = null
+    private var sourcePath: String? = null
+    private var grantPermissionsAfterInstall = false
+    private var deleteSourceAfterInstall = false
 
     fun preCheck(intent: Intent): Boolean {
         if (!Shizuku.pingBinder()
@@ -70,13 +76,14 @@ class InstallRepository(private val context: Application) {
         }
 
         this.intent = intent
+        sourceUri = intent.data ?: intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        sourcePath = null
         Log.v(TAG, "Intent: $intent")
 
         Hook.init(context)
         packageManager = Hook.pm
         packageInstaller = Hook.installer
         Hook.disableAdbVerify(context)
-        PreferredActivity.set(context.packageManager)
 
         installResult.value = InstallParse()
         return true
@@ -99,7 +106,9 @@ class InstallRepository(private val context: Application) {
                 return
             }
         }
-        if (uri != null && ContentResolver.SCHEME_CONTENT == uri.scheme) {
+        if (uri != null && (ContentResolver.SCHEME_CONTENT == uri.scheme ||
+            ContentResolver.SCHEME_FILE == uri.scheme)
+        ) {
             installResult.postValue(processContentUri(uri))
             return
         }
@@ -112,8 +121,19 @@ class InstallRepository(private val context: Application) {
         installResult.postValue(InstallAborted(ABORT_INFO))
     }
 
-    fun install(setInstaller: Boolean, commit: Boolean, full: Boolean, removeSplit: Boolean) {
+    fun install(
+        setInstaller: Boolean,
+        grantPermissions: Boolean,
+        deleteSource: Boolean,
+        commit: Boolean,
+        full: Boolean,
+        removeSplit: Boolean
+    ) {
         val uri = intent.data
+        if (sourceUri != uri) sourcePath = null
+        sourceUri = uri
+        grantPermissionsAfterInstall = grantPermissions
+        deleteSourceAfterInstall = deleteSource
         installResult.postValue(InstallInstalling(apkLite!!))
         if (ContentResolver.SCHEME_CONTENT != uri?.scheme &&
             ContentResolver.SCHEME_FILE != uri?.scheme
@@ -140,6 +160,7 @@ class InstallRepository(private val context: Application) {
                 session.removeSplit(apkLite!!.splitName!!)
             } else {
                 context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                    captureSourcePath(afd.parcelFileDescriptor.fd)
                     if (apkLite!!.zip) {
                         PackageUtil.stageZip(session, afd) {
                             stagingProgress.postValue(it)
@@ -168,11 +189,16 @@ class InstallRepository(private val context: Application) {
 
     private fun processContentUri(uri: Uri): InstallStage {
         Log.v(TAG, "content URI: $uri")
-        packageManager.resolveContentProvider(uri.authority!!, 0)?.also { info ->
-            callingUid = info.applicationInfo.uid
+        if (ContentResolver.SCHEME_CONTENT == uri.scheme) {
+            uri.authority?.let { authority ->
+                packageManager.resolveContentProvider(authority, 0)?.also { info ->
+                    callingUid = info.applicationInfo.uid
+                }
+            }
         }
         val apk = try {
             context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                captureSourcePath(afd.parcelFileDescriptor.fd)
                 PackageUtil.parseZipFromFd(afd)
             }
         } catch (e: Exception) {
@@ -229,7 +255,7 @@ class InstallRepository(private val context: Application) {
             // use this field to store the installer package name
             old.sharedUserId = packageManager.getInstallerPackageName(apk.packageName)
         }
-        if (apk.label == null) {
+        if (apk.label == null && ContentResolver.SCHEME_CONTENT == uri.scheme) {
             context.contentResolver.query(uri, null, null, null, null).use { cursor ->
                 if (cursor != null && cursor.moveToFirst()) {
                     val displayNameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -238,6 +264,8 @@ class InstallRepository(private val context: Application) {
                     }
                 }
             }
+        } else if (apk.label == null && ContentResolver.SCHEME_FILE == uri.scheme) {
+            apk.label = uri.path?.let { File(it).name }
         }
         apkLite = apk
         val skipCreate = stagedSessionId != SessionInfo.INVALID_ID
@@ -354,6 +382,7 @@ class InstallRepository(private val context: Application) {
 
         val p = params as PackageInstaller_rename.SessionParams
         p.installFlags = p.installFlags or PackageManager_rename.INSTALL_ALLOW_TEST
+        p.installFlags = p.installFlags or PackageManager_rename.INSTALL_GRANT_ALL_REQUESTED_PERMISSIONS
         p.installFlags = p.installFlags or PackageManager_rename.INSTALL_REPLACE_EXISTING
         p.installFlags = p.installFlags or PackageManager_rename.INSTALL_REQUEST_DOWNGRADE
         p.installFlags = p.installFlags or PackageManager_rename.INSTALL_FULL_APP
@@ -384,16 +413,322 @@ class InstallRepository(private val context: Application) {
 
     private fun setStageBasedOnResult(statusCode: Int, legacyStatus: Int, message: String?) {
         if (statusCode == PackageInstaller.STATUS_SUCCESS) {
-            val intent = packageManager.getLaunchIntentForPackage(apkLite!!.packageName)
-            packageManager.getPackageInfo(apkLite!!.packageName, 0)?.let { info ->
-                apkLite!!.icon = info.applicationInfo!!.loadIcon(packageManager)
-                apkLite!!.label = info.applicationInfo!!.loadLabel(packageManager).toString()
-            }
-            installResult.postValue(InstallSuccess(apkLite!!, intent))
+            val packageName = apkLite!!.packageName
+            val installedSource = sourceUri
+            Thread {
+                if (grantPermissionsAfterInstall) grantPostInstallAccess(packageName)
+                if (deleteSourceAfterInstall) deleteSourceApk(installedSource)
+
+                val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                packageManager.getPackageInfo(packageName, 0)?.let { info ->
+                    apkLite!!.icon = info.applicationInfo!!.loadIcon(packageManager)
+                    apkLite!!.label = info.applicationInfo!!.loadLabel(packageManager).toString()
+                }
+                installResult.postValue(InstallSuccess(apkLite!!, launchIntent))
+            }.start()
         } else {
             installResult.postValue(InstallFailed(apkLite!!, legacyStatus, statusCode, message))
         }
     }
+
+    private fun grantPostInstallAccess(packageName: String) {
+        if (!packageName.matches(Regex("[A-Za-z0-9_.]+"))) return
+
+        val uid = try {
+            packageManager.getApplicationInfo(packageName, 0).uid
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.w(TAG, "Could not resolve UID for $packageName", e)
+            return
+        }
+        val packageArg = shellQuote(packageName)
+        val commands = """
+            appops set $packageArg REQUEST_INSTALL_PACKAGES allow || true
+            appops set $packageArg SYSTEM_ALERT_WINDOW allow || true
+            appops set $packageArg WRITE_SETTINGS allow || true
+            appops set $packageArg MANAGE_EXTERNAL_STORAGE allow || true
+            dumpsys deviceidle whitelist +$packageArg || true
+            am set-standby-bucket $packageArg active || true
+            cmd activity set-inactive $packageArg false || true
+            cmd appops set $packageArg 40 allow || true
+            cmd appops set $packageArg 63 allow || true
+            cmd appops set $packageArg 70 allow || true
+            cmd appops set $packageArg 114 allow || true
+            cmd appops set $packageArg 115 allow || true
+            cmd appops set $packageArg 119 allow || true
+            cmd appops set $packageArg 128 allow || true
+            cmd netpolicy remove restrict-background-blacklist $uid 2>/dev/null || true
+            cmd netpolicy add restrict-background-whitelist $uid 2>/dev/null || true
+        """.trimIndent()
+        runShizukuCommand(commands, "post-install permissions for $packageName")
+    }
+
+    private fun deleteSourceApk(uri: Uri?) {
+        if (uri == null) return
+
+        val path = sourcePath ?: resolveSourcePath(uri)
+        if (!path.isNullOrBlank() && runShizukuCommand(
+                "rm -f -- ${shellQuote(path)}",
+                "delete source APK"
+            )
+        ) {
+            return
+        }
+
+        if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            if (!path.isNullOrBlank() && File(path).delete()) return
+        } else if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            try {
+                if (DocumentsContract.isDocumentUri(context, uri) &&
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                ) {
+                    return
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not delete source document $uri", e)
+            }
+
+            try {
+                if (context.contentResolver.delete(uri, null, null) > 0) return
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not delete source URI $uri", e)
+            }
+        }
+
+        Log.w(TAG, "Could not delete source APK: $uri (resolved path: $path)")
+    }
+
+    private fun resolveSourcePath(uri: Uri): String? {
+        if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            return uri.path?.let(::canonicalPath)
+        }
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return null
+
+        uri.path?.let(::canonicalPath)?.let { return it }
+        uri.pathSegments.firstOrNull { it.startsWith("raw:") }
+            ?.removePrefix("raw:")
+            ?.let(::canonicalPath)
+            ?.let { return it }
+
+        val authority = uri.authority.orEmpty()
+        val documentId = try {
+            if (DocumentsContract.isDocumentUri(context, uri)) {
+                DocumentsContract.getDocumentId(uri)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read document ID for $uri", e)
+            null
+        }
+        documentId?.let { id ->
+            val rawPath = when {
+                id.startsWith("raw:") -> id.removePrefix("raw:")
+                id.startsWith("/") -> id
+                else -> null
+            }
+            rawPath?.let(::canonicalPath)?.let { return it }
+        }
+
+        if (authority == "com.android.externalstorage.documents" && documentId != null) {
+            resolveExternalStorageDocument(documentId)?.let { return it }
+        }
+        if (authority == "com.android.providers.downloads.documents" && documentId != null) {
+            resolveDownloadsDocument(documentId, uri)?.let { return it }
+        }
+        if (authority == "com.android.providers.media.documents" && documentId != null) {
+            resolveMediaDocument(documentId)?.let { return it }
+        }
+
+        resolveProviderPath(uri)?.let { return it }
+        return null
+    }
+
+    private fun resolveExternalStorageDocument(documentId: String): String? {
+        val separator = documentId.indexOf(':')
+        if (separator <= 0 || separator == documentId.lastIndex) return null
+
+        val volume = documentId.substring(0, separator)
+        val relativePath = documentId.substring(separator + 1)
+        val root = if (volume.equals("primary", ignoreCase = true)) {
+            Environment.getExternalStorageDirectory()
+        } else {
+            File("/storage", volume)
+        }
+        return resolveUnderRoot(root, relativePath)
+    }
+
+    private fun resolveDownloadsDocument(documentId: String, originalUri: Uri): String? {
+        if (documentId.startsWith("raw:")) {
+            val rawPath = documentId.removePrefix("raw:")
+            return canonicalPath(rawPath)
+        }
+
+        val numericId = documentId.removePrefix("msf:").removePrefix("msd:").toLongOrNull()
+        if (numericId != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                resolveProviderPath(
+                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL, numericId)
+                )?.let { return it }
+            }
+            val publicDownloads = Uri.parse("content://downloads/public_downloads")
+            resolveProviderPath(ContentUris.withAppendedId(publicDownloads, numericId))?.let {
+                return it
+            }
+        }
+        return resolveProviderPath(originalUri)
+    }
+
+    private fun resolveMediaDocument(documentId: String): String? {
+        val separator = documentId.indexOf(':')
+        if (separator <= 0 || separator == documentId.lastIndex) return null
+        val mediaType = documentId.substring(0, separator)
+        val id = documentId.substring(separator + 1).toLongOrNull() ?: return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+
+        val volume = MediaStore.VOLUME_EXTERNAL
+        val mediaUri = when (mediaType) {
+            "document" -> MediaStore.Files.getContentUri(volume, id)
+            "downloads" -> MediaStore.Downloads.getContentUri(volume, id)
+            else -> null
+        } ?: return null
+        return resolveProviderPath(mediaUri)
+    }
+
+    private fun resolveProviderPath(uri: Uri): String? {
+        val projection = arrayOf(
+            MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.DISPLAY_NAME
+        )
+        var values = querySourceMetadata(uri, projection)
+        if (values?.first.isNullOrBlank() &&
+            (values?.second.isNullOrBlank() || values?.third.isNullOrBlank())
+        ) {
+            values = querySourceMetadata(
+                uri,
+                arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME)
+            ) ?: values
+        }
+
+        values?.first?.takeIf { it.startsWith('/') }?.let { return canonicalPath(it) }
+        val relativePath = values?.second?.takeIf { it.isNotBlank() } ?: return null
+        val displayName = values.third?.takeIf { it.isNotBlank() } ?: return null
+        val root = mediaVolumeRoot(uri) ?: return null
+        return resolveUnderRoot(root, relativePath, displayName)
+    }
+
+    private fun querySourceMetadata(
+        uri: Uri,
+        projection: Array<String>
+    ): Triple<String?, String?, String?>? {
+        return try {
+            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                val relativeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                Triple(
+                    if (dataIndex >= 0) cursor.getString(dataIndex) else null,
+                    if (relativeIndex >= 0) cursor.getString(relativeIndex) else null,
+                    if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not query source metadata for $uri", e)
+            null
+        }
+    }
+
+    private fun mediaVolumeRoot(uri: Uri): File? {
+        val volume = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.getVolumeName(uri)
+            else MediaStore.VOLUME_EXTERNAL
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not resolve MediaStore volume for $uri", e)
+            return null
+        }
+        return when (volume) {
+            MediaStore.VOLUME_EXTERNAL,
+            MediaStore.VOLUME_EXTERNAL_PRIMARY -> Environment.getExternalStorageDirectory()
+            else -> File("/storage", volume)
+        }
+    }
+
+    private fun resolveUnderRoot(root: File, vararg relativeParts: String): String? {
+        return try {
+            val canonicalRoot = root.canonicalFile
+            val candidate = relativeParts.fold(canonicalRoot) { parent, part ->
+                File(parent, part)
+            }.canonicalFile
+            val rootPrefix = canonicalRoot.path.trimEnd(File.separatorChar) + File.separator
+            candidate.path.takeIf { it.startsWith(rootPrefix) }
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not canonicalize source path under $root", e)
+            null
+        }
+    }
+
+    private fun canonicalPath(path: String): String? {
+        if (!path.startsWith('/')) return null
+        return try {
+            File(path).canonicalPath.takeIf(::isSharedStoragePath)
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not canonicalize source path $path", e)
+            null
+        }
+    }
+
+    private fun isSharedStoragePath(path: String): Boolean =
+        path.startsWith("/storage/") ||
+            path.startsWith("/data/media/") ||
+            path.startsWith("/mnt/media_rw/") ||
+            path.startsWith("/mnt/user/") ||
+            path.startsWith("/mnt/runtime/") ||
+            path.startsWith("/mnt/pass_through/") ||
+            path.startsWith("/sdcard/")
+
+    private fun captureSourcePath(fd: Int) {
+        val descriptor = "/proc/self/fd/$fd"
+        val path = try {
+            Os.readlink(descriptor)
+        } catch (e: Exception) {
+            try {
+                File(descriptor).canonicalPath
+            } catch (canonicalError: IOException) {
+                Log.w(TAG, "Could not resolve source descriptor $descriptor", canonicalError)
+                null
+            }
+        }
+        path?.let(::canonicalPath)?.also { sourcePath = it }
+    }
+
+    private fun runShizukuCommand(command: String, operation: String): Boolean {
+        try {
+            val factory = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            ).apply { isAccessible = true }
+            val process = factory.invoke(
+                null,
+                arrayOf("sh", "-c", "exec 2>&1\n$command"),
+                null,
+                null
+            ) as java.lang.Process
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                Log.w(TAG, "Shizuku command failed for $operation (exit $exitCode): $output")
+            }
+            return exitCode == 0
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not run Shizuku command for $operation", e)
+            return false
+        }
+    }
+
+    private fun shellQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
 
     fun cleanupInstall() {
         if (stagedSessionId > 0) {

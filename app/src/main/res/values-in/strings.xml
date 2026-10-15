@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Pemasang Shizuku</string>
+    <string name="app_name">installer</string>
 
     <string name="install">Pasang</string>
     <string name="update">Perbarui</string>
@@ -52,5 +52,4 @@
     <string name="error_shizuku_unavailable">Shizuku tidak tersedia.</string>
     <string name="error_create">Gagal membuat sesi pemasangan.</string>
     <string name="error_write">Gagal menyalin apk.</string>
-    <string name="error_info">Perangkat lunak ini adalah sumber terbuka di bawah %s.</string>
 </resources>

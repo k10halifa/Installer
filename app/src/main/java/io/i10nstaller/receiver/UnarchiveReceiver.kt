@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.receiver
+package io.i10nstaller.receiver
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver

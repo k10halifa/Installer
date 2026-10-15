@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.ui.fragments;
+package io.i10nstaller.ui.fragments;
 
 import android.content.DialogInterface;
 import android.os.Bundle;
@@ -8,8 +8,8 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.DialogFragment;
 import androidx.lifecycle.ViewModelProvider;
 
-import io.github.vvb2060.packageinstaller.model.InstallStage;
-import io.github.vvb2060.packageinstaller.viewmodel.InstallViewModel;
+import io.i10nstaller.model.InstallStage;
+import io.i10nstaller.viewmodel.InstallViewModel;
 
 public class BaseDialogFragment extends DialogFragment {
 

@@ -1,4 +1,4 @@
-package io.github.vvb2060.packageinstaller.model
+package io.i10nstaller.model
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo

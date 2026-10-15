@@ -17,7 +17,10 @@
 }
 -dontwarn dalvik.system.VMRuntime
 
--keepclassmembers class io.github.vvb2060.packageinstaller.viewmodel.InstallViewModel {
+-keepclassmembers class io.i10nstaller.viewmodel.InstallViewModel {
     <init>(android.app.Application);
 }
 -keepnames class moe.shizuku.api.BinderContainer
+-keepclassmembers class rikka.shizuku.Shizuku {
+    private static rikka.shizuku.ShizukuRemoteProcess newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+}
