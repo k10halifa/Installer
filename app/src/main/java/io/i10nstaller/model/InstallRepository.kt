@@ -41,6 +41,10 @@ import io.i10nstaller.model.InstallAborted.Companion.ABORT_PARSE
 import io.i10nstaller.model.InstallAborted.Companion.ABORT_SHIZUKU
 import io.i10nstaller.model.InstallAborted.Companion.ABORT_SPLIT
 import io.i10nstaller.model.InstallAborted.Companion.ABORT_WRITE
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
 import java.io.File
@@ -48,6 +52,7 @@ import java.io.IOException
 
 class InstallRepository(private val context: Application) {
     private val TAG = InstallRepository::class.java.simpleName
+    private val postInstallScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val installResult = MutableLiveData<InstallStage>()
     val stagingProgress = MutableLiveData<Int>()
     private lateinit var packageManager: PackageManager
@@ -416,17 +421,12 @@ class InstallRepository(private val context: Application) {
         if (statusCode == PackageInstaller.STATUS_SUCCESS) {
             val packageName = apkLite!!.packageName
             val installedSource = sourceUri
-            Thread {
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            installResult.postValue(InstallSuccess(apkLite!!, launchIntent))
+            postInstallScope.launch {
                 if (grantPermissionsAfterInstall) grantPostInstallAccess(packageName)
                 if (deleteSourceAfterInstall) deleteSourceApk(installedSource)
-
-                val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                packageManager.getPackageInfo(packageName, 0)?.let { info ->
-                    apkLite!!.icon = info.applicationInfo!!.loadIcon(packageManager)
-                    apkLite!!.label = info.applicationInfo!!.loadLabel(packageManager).toString()
-                }
-                installResult.postValue(InstallSuccess(apkLite!!, launchIntent))
-            }.start()
+            }
         } else {
             installResult.postValue(InstallFailed(apkLite!!, legacyStatus, statusCode, message))
         }

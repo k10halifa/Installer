@@ -65,6 +65,7 @@ dependencies {
     compileOnly(projects.stub)
     implementation("androidx.fragment:fragment:1.8.8")
     implementation("androidx.lifecycle:lifecycle-livedata:2.9.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")

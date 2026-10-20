@@ -16,6 +16,7 @@
     ** requireNonNull(...);
 }
 -dontwarn dalvik.system.VMRuntime
+-dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
 
 -keepclassmembers class io.i10nstaller.viewmodel.InstallViewModel {
     <init>(android.app.Application);
