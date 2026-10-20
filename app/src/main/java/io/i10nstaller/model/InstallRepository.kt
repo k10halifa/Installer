@@ -17,6 +17,7 @@ import android.content.pm.PackageInstaller_rename
 import android.content.pm.PackageManager
 import android.content.pm.PackageManager_rename
 import android.content.pm.VersionedPackage
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -466,35 +467,105 @@ class InstallRepository(private val context: Application) {
         if (uri == null) return
 
         val path = sourcePath ?: resolveSourcePath(uri)
-        if (!path.isNullOrBlank() && runShizukuCommand(
-                "rm -f -- ${shellQuote(path)}",
-                "delete source APK"
+        val sourceMetadata = if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            querySourceMetadata(
+                uri,
+                arrayOf(
+                    MediaStore.MediaColumns.DATA,
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    MediaStore.MediaColumns.DISPLAY_NAME
+                )
             )
-        ) {
-            return
+        } else {
+            null
         }
+        val deletedFilePath = path ?: sourceMetadata?.first?.takeIf { it.startsWith("/") }
+        var deleted = !path.isNullOrBlank() && runShizukuCommand(
+            "rm -f -- ${shellQuote(path)}",
+            "delete source APK"
+        )
 
         if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            if (!path.isNullOrBlank() && File(path).delete()) return
+            if (!deleted && !path.isNullOrBlank()) deleted = File(path).delete()
         } else if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
             try {
                 if (DocumentsContract.isDocumentUri(context, uri) &&
                     DocumentsContract.deleteDocument(context.contentResolver, uri)
                 ) {
-                    return
+                    deleted = true
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not delete source document $uri", e)
             }
 
             try {
-                if (context.contentResolver.delete(uri, null, null) > 0) return
+                if (context.contentResolver.delete(uri, null, null) > 0) deleted = true
             } catch (e: Exception) {
                 Log.w(TAG, "Could not delete source URI $uri", e)
             }
         }
 
-        Log.w(TAG, "Could not delete source APK: $uri (resolved path: $path)")
+        if (deleted) {
+            if (!deletedFilePath.isNullOrBlank()) {
+                MediaScannerConnection.scanFile(context, arrayOf(deletedFilePath), null, null)
+            }
+            deleteMediaStoreEntry(deletedFilePath, sourceMetadata)
+        } else {
+            Log.w(TAG, "Could not delete source APK: $uri (resolved path: $path)")
+        }
+    }
+
+    private fun deleteMediaStoreEntry(
+        path: String?,
+        sourceMetadata: Triple<String?, String?, String?>?
+    ) {
+        val filesUri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        val resolver = context.contentResolver
+        var deleted = 0
+        if (!path.isNullOrBlank()) {
+            try {
+                deleted = resolver.delete(
+                    filesUri,
+                    "${MediaStore.MediaColumns.DATA}=?",
+                    arrayOf(path)
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not delete MediaStore entry for $path", e)
+            }
+        }
+        if (deleted > 0) return
+
+        val file = path?.let(::File)
+        val displayName = sourceMetadata?.third?.takeIf { it.isNotBlank() }
+            ?: file?.name?.takeIf { it.isNotBlank() }
+        val relativePath = sourceMetadata?.second?.takeIf { it.isNotBlank() }
+            ?: file?.parentFile?.let(::mediaRelativePath)
+        if (displayName.isNullOrBlank() || relativePath.isNullOrBlank()) return
+
+        try {
+            resolver.delete(
+                filesUri,
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+                    "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                arrayOf(displayName, relativePath)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not delete MediaStore entry for $displayName", e)
+        }
+    }
+
+    private fun mediaRelativePath(directory: File): String? {
+        return try {
+            val root = Environment.getExternalStorageDirectory().canonicalPath
+            val directoryPath = directory.canonicalPath
+            val rootPrefix = root.trimEnd(File.separatorChar) + File.separator
+            directoryPath.removePrefix(rootPrefix)
+                .takeIf { directoryPath.startsWith(rootPrefix) }
+                ?.let { "$it${File.separator}" }
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not resolve MediaStore relative path for $directory", e)
+            null
+        }
     }
 
     private fun resolveSourcePath(uri: Uri): String? {

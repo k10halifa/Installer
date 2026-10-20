@@ -21,8 +21,8 @@ android {
     namespace = "io.i10nstaller"
     defaultConfig {
         applicationId = "io.i10nstaller"
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
         optimization {
             keepRules {
                 ignoreFromAllExternalDependencies(true)
