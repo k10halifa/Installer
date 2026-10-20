@@ -52,6 +52,7 @@ import java.io.IOException
 
 class InstallRepository(private val context: Application) {
     private val TAG = InstallRepository::class.java.simpleName
+    private val CLEANUP_TAG = "InstallCleanup"
     private val postInstallScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val installResult = MutableLiveData<InstallStage>()
     val stagingProgress = MutableLiveData<Int>()
@@ -463,10 +464,19 @@ class InstallRepository(private val context: Application) {
         runShizukuCommand(commands, "post-install permissions for $packageName")
     }
 
+    private data class MediaStoreEntry(
+        val collectionUri: Uri,
+        val id: Long,
+        val dataPath: String?,
+        val relativePath: String?
+    ) {
+        val itemUri: Uri
+            get() = ContentUris.withAppendedId(collectionUri, id)
+    }
+
     private fun deleteSourceApk(uri: Uri?) {
         if (uri == null) return
 
-        val path = sourcePath ?: resolveSourcePath(uri)
         val sourceMetadata = if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
             querySourceMetadata(
                 uri,
@@ -479,78 +489,244 @@ class InstallRepository(private val context: Application) {
         } else {
             null
         }
-        val deletedFilePath = path ?: sourceMetadata?.first?.takeIf { it.startsWith("/") }
-        var deleted = !path.isNullOrBlank() && runShizukuCommand(
-            "rm -f -- ${shellQuote(path)}",
-            "delete source APK"
+        val path = sourcePath ?: resolveSourcePath(uri)
+            ?: sourceMetadata?.first?.takeIf { it.startsWith("/") }
+        val paths = sourcePaths(path, sourceMetadata?.first)
+        val displayName = sourceMetadata?.third?.takeIf { it.isNotBlank() }
+            ?: path?.let { File(it).name }
+        val relativePath = sourceMetadata?.second?.takeIf { it.isNotBlank() }
+            ?: path?.let { File(it).parentFile?.let(::mediaRelativePath) }
+        Log.d(CLEANUP_TAG, "Source URI=$uri resolvedPath=$path pathCandidates=$paths")
+
+        val entries = queryMediaStoreEntries(paths, displayName, relativePath)
+        Log.d(
+            CLEANUP_TAG,
+            "Pre-delete MediaStore entries=${entries.map { "${it.collectionUri}/${it.id}:${it.dataPath}" }}"
         )
 
-        if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            if (!deleted && !path.isNullOrBlank()) deleted = File(path).delete()
-        } else if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
-            try {
-                if (DocumentsContract.isDocumentUri(context, uri) &&
-                    DocumentsContract.deleteDocument(context.contentResolver, uri)
-                ) {
-                    deleted = true
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not delete source document $uri", e)
-            }
-
-            try {
-                if (context.contentResolver.delete(uri, null, null) > 0) deleted = true
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not delete source URI $uri", e)
-            }
-        }
-
-        if (deleted) {
-            if (!deletedFilePath.isNullOrBlank()) {
-                MediaScannerConnection.scanFile(context, arrayOf(deletedFilePath), null, null)
-            }
-            deleteMediaStoreEntry(deletedFilePath, sourceMetadata)
-        } else {
-            Log.w(TAG, "Could not delete source APK: $uri (resolved path: $path)")
-        }
-    }
-
-    private fun deleteMediaStoreEntry(
-        path: String?,
-        sourceMetadata: Triple<String?, String?, String?>?
-    ) {
-        val filesUri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        var deletionSucceeded = false
         val resolver = context.contentResolver
-        var deleted = 0
-        if (!path.isNullOrBlank()) {
+
+        // Tier 1: ask the source provider to delete its own document/URI.
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            if (DocumentsContract.isDocumentUri(context, uri) || DocumentsContract.isTreeUri(uri)) {
+                try {
+                    val rows = DocumentsContract.deleteDocument(resolver, uri)
+                    deletionSucceeded = deletionSucceeded || rows
+                    Log.d(CLEANUP_TAG, "DocumentContract delete uri=$uri result=$rows")
+                } catch (e: Exception) {
+                    Log.d(CLEANUP_TAG, "DocumentContract delete failed uri=$uri: ${e.message}")
+                }
+            }
             try {
-                deleted = resolver.delete(
-                    filesUri,
-                    "${MediaStore.MediaColumns.DATA}=?",
-                    arrayOf(path)
+                val rows = resolver.delete(uri, null, null)
+                deletionSucceeded = deletionSucceeded || rows > 0
+                Log.d(CLEANUP_TAG, "Source URI delete uri=$uri rows=$rows")
+            } catch (e: Exception) {
+                Log.d(CLEANUP_TAG, "Source URI delete failed uri=$uri: ${e.message}")
+            }
+        }
+
+        // Tier 2: remove the captured MediaStore rows by item ID and by file path.
+        for (entry in entries) {
+            try {
+                val rows = resolver.delete(entry.itemUri, null, null)
+                Log.d(
+                    CLEANUP_TAG,
+                    "Resolver item delete uri=${entry.itemUri} id=${entry.id} rows=$rows"
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "Could not delete MediaStore entry for $path", e)
+                Log.d(CLEANUP_TAG, "Resolver item delete failed uri=${entry.itemUri}: ${e.message}")
             }
         }
-        if (deleted > 0) return
+        val collections = mediaStoreCollections()
+        for (collection in collections) {
+            for (candidatePath in paths) {
+                try {
+                    val rows = resolver.delete(
+                        collection,
+                        "${MediaStore.MediaColumns.DATA}=?",
+                        arrayOf(candidatePath)
+                    )
+                    Log.d(
+                        CLEANUP_TAG,
+                        "Resolver path delete collection=$collection path=$candidatePath rows=$rows"
+                    )
+                } catch (e: Exception) {
+                    Log.d(
+                        CLEANUP_TAG,
+                        "Resolver path delete failed collection=$collection path=$candidatePath: ${e.message}"
+                    )
+                }
+            }
+            if (entries.none { it.collectionUri == collection } &&
+                !displayName.isNullOrBlank() && !relativePath.isNullOrBlank()
+            ) {
+                try {
+                    val rows = resolver.delete(
+                        collection,
+                        "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+                            "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                        arrayOf(displayName, relativePath)
+                    )
+                    Log.d(
+                        CLEANUP_TAG,
+                        "Resolver name delete collection=$collection name=$displayName rows=$rows"
+                    )
+                } catch (e: Exception) {
+                    Log.d(CLEANUP_TAG, "Resolver name delete failed collection=$collection: ${e.message}")
+                }
+            }
+        }
 
-        val file = path?.let(::File)
-        val displayName = sourceMetadata?.third?.takeIf { it.isNotBlank() }
-            ?: file?.name?.takeIf { it.isNotBlank() }
-        val relativePath = sourceMetadata?.second?.takeIf { it.isNotBlank() }
-            ?: file?.parentFile?.let(::mediaRelativePath)
-        if (displayName.isNullOrBlank() || relativePath.isNullOrBlank()) return
-
-        try {
-            resolver.delete(
-                filesUri,
-                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
-                    "${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-                arrayOf(displayName, relativePath)
+        // Tier 3: Shizuku's shell identity can delete rows owned by other apps.
+        if (!path.isNullOrBlank()) {
+            val result = runShizukuCommand(
+                "rm -f -- ${shellQuote(path)}",
+                "delete source APK",
+                logCleanupOutput = true
             )
+            deletionSucceeded = deletionSucceeded || result
+        }
+        val sqlPaths = paths.map { it.replace("'", "''") }.distinct()
+        for (collection in collections) {
+            for (candidatePath in sqlPaths) {
+                val where = "${MediaStore.MediaColumns.DATA}='$candidatePath'"
+                runShizukuCommand(
+                    "content delete --uri ${shellQuote(collection.toString())} " +
+                        "--where ${shellQuote(where)}",
+                    "delete MediaStore path row",
+                    logCleanupOutput = true
+                )
+            }
+        }
+        for (entry in entries) {
+            runShizukuCommand(
+                "content delete --uri ${shellQuote(entry.itemUri.toString())}",
+                "delete MediaStore row ${entry.id}",
+                logCleanupOutput = true
+            )
+        }
+
+        // Tier 4: refresh the scanner for the containing directory and deleted path.
+        if (paths.isNotEmpty()) {
+            val scanPaths = paths.flatMap { candidate ->
+                listOfNotNull(File(candidate).parent, candidate)
+            }.distinct().toTypedArray()
+            Log.d(CLEANUP_TAG, "Scanning paths=${scanPaths.contentToString()}")
+            MediaScannerConnection.scanFile(context, scanPaths, null) { scannedPath, scannedUri ->
+                Log.d(CLEANUP_TAG, "Media scan completed path=$scannedPath uri=$scannedUri")
+            }
+        }
+
+        Log.d(
+            CLEANUP_TAG,
+            "Cleanup complete uri=$uri path=$path providerDeleteSucceeded=$deletionSucceeded"
+        )
+    }
+
+    private fun mediaStoreCollections(): List<Uri> {
+        val collections = mutableListOf(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            collections += MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        }
+        return collections
+    }
+
+    private fun sourcePaths(vararg paths: String?): List<String> {
+        return paths.filterNotNull().filter { it.startsWith('/') }.flatMap { path ->
+            val file = File(path)
+            listOfNotNull(
+                file.absolutePath,
+                try {
+                    file.canonicalPath
+                } catch (_: IOException) {
+                    null
+                }
+            )
+        }.distinct()
+    }
+
+    private fun queryMediaStoreEntries(
+        paths: List<String>,
+        displayName: String?,
+        relativePath: String?
+    ): List<MediaStoreEntry> {
+        val entries = mutableListOf<MediaStoreEntry>()
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.DISPLAY_NAME
+        )
+        for (collection in mediaStoreCollections()) {
+            if (paths.isNotEmpty()) {
+                val placeholders = paths.joinToString(",") { "?" }
+                queryMediaStoreRows(
+                    collection,
+                    projection,
+                    "${MediaStore.MediaColumns.DATA} IN ($placeholders)",
+                    paths.toTypedArray()
+                )?.let(entries::addAll)
+            }
+            if (entries.none { it.collectionUri == collection } && !displayName.isNullOrBlank()) {
+                val selection = if (relativePath.isNullOrBlank()) {
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=?"
+                } else {
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+                        "${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+                }
+                val args = if (relativePath.isNullOrBlank()) {
+                    arrayOf(displayName)
+                } else {
+                    arrayOf(displayName, relativePath)
+                }
+                val fallbackRows = queryMediaStoreRows(collection, projection, selection, args)
+                val matchingRows = fallbackRows.orEmpty().filter { entry ->
+                    entry.dataPath in paths ||
+                        (!relativePath.isNullOrBlank() && entry.relativePath == relativePath) ||
+                        fallbackRows?.size == 1
+                }
+                entries += matchingRows
+            }
+        }
+        return entries.distinctBy { it.collectionUri to it.id }
+    }
+
+    private fun queryMediaStoreRows(
+        collection: Uri,
+        projection: Array<String>,
+        selection: String,
+        selectionArgs: Array<String>
+    ): List<MediaStoreEntry>? {
+        return try {
+            context.contentResolver.query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                val dataIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                val relativeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                buildList {
+                    while (cursor.moveToNext()) {
+                        if (idIndex < 0) continue
+                        add(
+                            MediaStoreEntry(
+                                collection,
+                                cursor.getLong(idIndex),
+                                if (dataIndex >= 0) cursor.getString(dataIndex) else null,
+                                if (relativeIndex >= 0) cursor.getString(relativeIndex) else null
+                            )
+                        )
+                    }
+                }
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "Could not delete MediaStore entry for $displayName", e)
+            Log.d(CLEANUP_TAG, "MediaStore query failed collection=$collection: ${e.message}")
+            null
         }
     }
 
@@ -773,7 +949,11 @@ class InstallRepository(private val context: Application) {
         path?.let(::canonicalPath)?.also { sourcePath = it }
     }
 
-    private fun runShizukuCommand(command: String, operation: String): Boolean {
+    private fun runShizukuCommand(
+        command: String,
+        operation: String,
+        logCleanupOutput: Boolean = false
+    ): Boolean {
         try {
             val factory = Shizuku::class.java.getDeclaredMethod(
                 "newProcess",
@@ -789,6 +969,9 @@ class InstallRepository(private val context: Application) {
             ) as java.lang.Process
             val output = process.inputStream.bufferedReader().use { it.readText() }
             val exitCode = process.waitFor()
+            if (logCleanupOutput) {
+                Log.d(CLEANUP_TAG, "Shizuku operation=$operation exitCode=$exitCode output=$output")
+            }
             if (exitCode != 0) {
                 Log.w(TAG, "Shizuku command failed for $operation (exit $exitCode): $output")
             }
