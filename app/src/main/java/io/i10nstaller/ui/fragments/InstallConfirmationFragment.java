@@ -51,17 +51,22 @@ public class InstallConfirmationFragment extends BaseDialogFragment {
             .setIcon(mDialogData.getApkLite().getIcon())
             .setTitle(mDialogData.getApkLite().getLabel())
             .setView(dialogView)
-            .setPositiveButton(R.string.install,
-                (dialog, which) -> mViewModel.initiateInstall(
-                    InstallOptions.getBoolean(
-                        context, InstallOptions.KEY_SET_INSTALLER, false),
-                    InstallOptions.getBoolean(
-                        context, InstallOptions.KEY_GRANT_PERMISSIONS, false),
-                    InstallOptions.getBoolean(
-                        context, InstallOptions.KEY_DELETE_APK, false),
-                    true,
-                    full,
-                    remove))
+            .setPositiveButton(R.string.install, (dialog, which) -> {
+                try {
+                    mViewModel.initiateInstall(
+                        InstallOptions.getBoolean(
+                            context, InstallOptions.KEY_SET_INSTALLER, false),
+                        InstallOptions.getBoolean(
+                            context, InstallOptions.KEY_GRANT_PERMISSIONS, false),
+                        InstallOptions.getBoolean(
+                            context, InstallOptions.KEY_DELETE_APK, false),
+                        true,
+                        full,
+                        remove);
+                } catch (Exception e) {
+                    mViewModel.reportUnexpectedFailure(e);
+                }
+            })
             .setNegativeButton(android.R.string.cancel,
                 (dialog, which) -> cleanAndFinish())
             .create();
@@ -72,7 +77,9 @@ public class InstallConfirmationFragment extends BaseDialogFragment {
     @Override
     public void onStart() {
         super.onStart();
-        mDialog.getButton(AlertDialog.BUTTON_POSITIVE).setFilterTouchesWhenObscured(true);
+        var positiveButton = mDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        positiveButton.setFilterTouchesWhenObscured(true);
+        focusPositiveButtonForDpad();
     }
 
     @Override

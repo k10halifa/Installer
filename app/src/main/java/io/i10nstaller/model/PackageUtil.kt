@@ -4,6 +4,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.content.Context
 import android.content.res.ApkAssets
 import android.content.res.AssetFileDescriptor
 import android.content.res.AssetManager
@@ -13,7 +14,9 @@ import android.content.res.XmlBlock
 import android.content.res.XmlResourceParser
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.os.Build.VERSION_CODES
 import android.util.DisplayMetrics
+import android.util.Log
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
@@ -25,11 +28,14 @@ import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.function.Consumer
 
 object PackageUtil {
+    private const val TAG = "PackageUtil"
+
     fun getApkLite(pm: PackageManager, pkgInfo: PackageInfo): ApkLite {
         val info = pkgInfo.applicationInfo ?: ApplicationInfo().apply {
             packageName = pkgInfo.packageName
@@ -48,22 +54,55 @@ object PackageUtil {
         ).apply { zip = true }
     }
 
-    fun parseZipFromFd(afd: AssetFileDescriptor): ApkLite? {
+    fun parseZipFromFd(
+        context: Context,
+        afd: AssetFileDescriptor,
+        archivePath: File? = null
+    ): ApkLite? {
         ZipFile.builder()
             .setIgnoreLocalFileHeader(true)
             .setSeekableByteChannel(afd.createInputStream().getChannel())
             .get().use { zipFile ->
                 val xml = zipFile.getEntry("AndroidManifest.xml")
                 if (xml != null) {
-                    try {
-                        return getAppLiteFromApkFd(
+                    val apkLite = try {
+                        getAppLiteFromApkFd(
                             afd.getFileDescriptor(),
-                            afd.toString(), afd.getLength()
+                            afd.toString(),
+                            afd.getLength()
                         )
-                    } catch (_: IOException) {
-                        zipFile.getInputStream(xml).use { input ->
-                            val bytes = IOUtils.toByteArray(input)
-                            return getAppLiteFromXmlBytes(bytes)
+                    } catch (e: Exception) {
+                        Log.w(
+                            TAG,
+                            "Could not load APK assets from file descriptor; parsing manifest bytes",
+                            e
+                        )
+                        null
+                    } catch (e: LinkageError) {
+                        Log.w(TAG, "APK assets API is unavailable; parsing manifest bytes", e)
+                        null
+                    }
+                    if (apkLite != null) {
+                        resolveArchiveResources(
+                            context,
+                            afd,
+                            apkLite,
+                            archivePath,
+                            Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q
+                        )
+                        return apkLite
+                    }
+
+                    zipFile.getInputStream(xml).use { input ->
+                        val bytes = IOUtils.toByteArray(input)
+                        return getAppLiteFromXmlBytes(bytes)?.also {
+                            resolveArchiveResources(
+                                context,
+                                afd,
+                                it,
+                                archivePath,
+                                Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q
+                            )
                         }
                     }
                 }
@@ -102,6 +141,61 @@ object PackageUtil {
 
     }
 
+    private fun resolveArchiveResources(
+        context: Context,
+        afd: AssetFileDescriptor,
+        apkLite: ApkLite,
+        archivePath: File?,
+        force: Boolean
+    ) {
+        if (!force &&
+            !apkLite.label.isNullOrBlank() &&
+            !apkLite.label!!.startsWith("@") &&
+            apkLite.icon != null
+        ) {
+            return
+        }
+
+        var temporaryArchive: File? = null
+        try {
+            val archiveFile = archivePath ?: File.createTempFile(
+                "installer-archive-",
+                ".apk",
+                context.cacheDir
+            ).also { temporaryArchive = it }
+            if (archivePath == null) {
+                afd.createInputStream().use { input ->
+                    FileOutputStream(archiveFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            val packageManager = context.packageManager
+            val archiveInfo = packageManager.getPackageArchiveInfo(
+                archiveFile.absolutePath,
+                PackageManager.GET_META_DATA
+            ) ?: return
+            val applicationInfo = archiveInfo.applicationInfo ?: return
+            applicationInfo.sourceDir = archiveFile.absolutePath
+            applicationInfo.publicSourceDir = archiveFile.absolutePath
+
+            val label = applicationInfo.loadLabel(packageManager)?.toString()
+                ?.takeIf { it.isNotBlank() && !it.startsWith("@") }
+                ?: archiveInfo.packageName
+            if (force || apkLite.label.isNullOrBlank() || apkLite.label!!.startsWith("@")) {
+                apkLite.label = label
+            }
+            applicationInfo.loadIcon(packageManager)?.let { apkLite.icon = it }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not resolve app label and icon from APK archive resources", e)
+        } catch (e: LinkageError) {
+            Log.w(TAG, "APK archive metadata API is unavailable", e)
+        } finally {
+            temporaryArchive?.delete()
+        }
+    }
+
     private fun getAppLiteFromXmlBytesLink(xmlBytes: ByteArray): ApkLite? {
         XmlBlock(xmlBytes).use {
             it.newParser().use { parser ->
@@ -130,11 +224,7 @@ object PackageUtil {
     }
 
     private fun getAppLiteFromApkFd(fd: FileDescriptor, name: String, length: Long): ApkLite? {
-        val assets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            ApkAssets.loadFromFd(fd, name, 0, length, 0, null)
-        } else {
-            ApkAssets.loadFromFd(fd, name, false, false)
-        }
+        val assets = loadApkAssetsFromFd(fd, name, length)
         val am = `AssetManager$Builder`()
             .addApkAssets(assets)
             .build() as AssetManager
@@ -144,6 +234,61 @@ object PackageUtil {
         val xmlParser = assets.openXml("AndroidManifest.xml")
         return xmlParser?.use {
             parsingAndroidManifest(xmlParser, apkResources)
+        }
+    }
+
+    private fun loadApkAssetsFromFd(
+        fd: FileDescriptor,
+        friendlyName: String,
+        length: Long
+    ): ApkAssets {
+        val method = ApkAssets::class.java.declaredMethods
+            .filter { candidate ->
+                candidate.name == "loadFromFd" &&
+                    java.lang.reflect.Modifier.isStatic(candidate.modifiers) &&
+                    isSupportedLoadFromFdSignature(candidate.parameterTypes)
+            }
+            .minByOrNull { candidate -> loadFromFdPriority(candidate.parameterTypes) }
+            ?: throw NoSuchMethodException("No supported ApkAssets.loadFromFd method")
+        method.isAccessible = true
+
+        val parameters = method.parameterTypes
+        val arguments = when {
+            parameters.size == 6 -> arrayOf(fd, friendlyName, 0L, length, 0, null)
+            parameters.size == 4 && parameters[2] == Int::class.javaPrimitiveType ->
+                arrayOf(fd, friendlyName, 0, null)
+            parameters.size == 3 -> arrayOf(fd, friendlyName, 0)
+            else -> arrayOf(fd, friendlyName, false, false)
+        }
+        return method.invoke(null, *arguments) as ApkAssets
+    }
+
+    private fun loadFromFdPriority(parameters: Array<Class<*>>): Int =
+        when {
+            parameters.size == 6 -> 0
+            parameters.size == 4 && parameters[2] == Int::class.javaPrimitiveType -> 1
+            parameters.size == 3 -> 2
+            else -> 3
+        }
+
+    private fun isSupportedLoadFromFdSignature(parameters: Array<Class<*>>): Boolean {
+        if (parameters.size < 2 ||
+            parameters[0] != FileDescriptor::class.java ||
+            parameters[1] != String::class.java
+        ) {
+            return false
+        }
+        return when (parameters.size) {
+            6 -> parameters[2] == Long::class.javaPrimitiveType &&
+                parameters[3] == Long::class.javaPrimitiveType &&
+                parameters[4] == Int::class.javaPrimitiveType &&
+                parameters[5].simpleName == "AssetsProvider"
+            4 -> (parameters[2] == Int::class.javaPrimitiveType &&
+                parameters[3].simpleName == "AssetsProvider") ||
+                (parameters[2] == Boolean::class.javaPrimitiveType &&
+                    parameters[3] == Boolean::class.javaPrimitiveType)
+            3 -> parameters[2] == Int::class.javaPrimitiveType
+            else -> false
         }
     }
 
@@ -362,17 +507,29 @@ object PackageUtil {
     ) {
         callback.accept(0)
         val total = afd.getLength()
-        val instream = afd.createInputStream()
         var totalRead = 0L
-        val fileName = System.currentTimeMillis().toString()
+        val fileName = if (Build.VERSION.SDK_INT <= VERSION_CODES.Q) {
+            "base.apk"
+        } else {
+            System.currentTimeMillis().toString()
+        }
         session.openWrite(fileName, 0, total).use { out ->
-            val buffer = ByteArray(16 * 1024)
-            var numRead: Int
-            while (instream.read(buffer).also { numRead = it } != -1) {
-                out.write(buffer, 0, numRead)
-                totalRead += numRead
-                val fraction = totalRead.toFloat() / total.toFloat()
-                callback.accept((fraction * 100.0).toInt())
+            afd.createInputStream().use { instream ->
+                val buffer = ByteArray(16 * 1024)
+                var numRead: Int
+                while (instream.read(buffer).also { numRead = it } != -1) {
+                    out.write(buffer, 0, numRead)
+                    totalRead += numRead
+                    if (total > 0L) {
+                        callback.accept((totalRead.toFloat() / total.toFloat() * 100.0).toInt())
+                    }
+                }
+            }
+            if (totalRead == 0L) throw IOException("The selected package contains no data")
+            if (total >= 0L && totalRead != total) {
+                throw IOException(
+                    "The selected package stream was incomplete ($totalRead of $total bytes)"
+                )
             }
             session.fsync(out)
         }

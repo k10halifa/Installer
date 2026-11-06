@@ -64,6 +64,9 @@ public class InstallErrorFragment extends BaseDialogFragment {
     }
 
     private String getErrorMessage(Context context, int code) {
+        if (mAborted.getMessage() != null && !mAborted.getMessage().isBlank()) {
+            return mAborted.getMessage();
+        }
         switch (code) {
             case InstallAborted.ABORT_SHIZUKU -> {
                 if (!Shizuku.pingBinder()) {
@@ -106,6 +109,8 @@ public class InstallErrorFragment extends BaseDialogFragment {
 
     private void addOption(Context context, LinearLayout parent, int label, String key) {
         var checkbox = new CheckBox(context);
+        checkbox.setFocusable(true);
+        checkbox.setClickable(true);
         checkbox.setText(label);
         checkbox.setChecked(InstallOptions.getBoolean(context, key, false));
         checkbox.setOnCheckedChangeListener((button, checked) ->

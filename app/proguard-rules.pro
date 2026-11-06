@@ -21,6 +21,9 @@
 -keepclassmembers class io.i10nstaller.viewmodel.InstallViewModel {
     <init>(android.app.Application);
 }
+-keep class io.i10nstaller.model.ModernInstallResultSender {
+    public static android.content.IntentSender create(kotlin.jvm.functions.Function4);
+}
 -keepnames class moe.shizuku.api.BinderContainer
 -keepclassmembers class rikka.shizuku.Shizuku {
     private static rikka.shizuku.ShizukuRemoteProcess newProcess(java.lang.String[], java.lang.String[], java.lang.String);

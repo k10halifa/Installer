@@ -21,7 +21,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     fun preprocessIntent(intent: Intent) {
         if (repository.preCheck(intent)) {
-            executor.executeOnDiskIO {
+            executeDiskIo {
                 repository.parseUri()
             }
         }
@@ -29,6 +29,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     fun cleanupInstall() {
         repository.cleanupInstall()
+    }
+
+    fun reportUnexpectedFailure(error: Throwable) {
+        repository.reportUnexpectedFailure(error)
     }
 
     fun initiateInstall(
@@ -39,7 +43,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         full: Boolean,
         removeSplit: Boolean
     ) {
-        executor.executeOnDiskIO {
+        executeDiskIo {
             repository.install(
                 setInstaller,
                 grantPermissions,
@@ -52,14 +56,27 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun archivePackage(info: PackageInfo, uninstall: Boolean) {
-        executor.executeOnDiskIO {
+        executeDiskIo {
             repository.archivePackage(info, uninstall)
         }
     }
 
     fun setPackageEnabled(packageName: String, enabled: Boolean) {
-        executor.executeOnDiskIO {
+        executeDiskIo {
             repository.setPackageEnabled(packageName, enabled)
+        }
+    }
+
+    private fun executeDiskIo(block: () -> Unit) {
+        executor.executeOnDiskIO {
+            try {
+                block()
+            } catch (e: Exception) {
+                repository.reportUnexpectedFailure(e)
+            } catch (t: Throwable) {
+                if (t is VirtualMachineError || t is ThreadDeath) throw t
+                repository.reportUnexpectedFailure(t)
+            }
         }
     }
 }

@@ -49,6 +49,7 @@ class InstallFailed(
 class InstallAborted(
     val abortReason: Int,
     val intent: Intent? = null,
+    val message: String? = null,
 ) : InstallStage(STAGE_ABORTED) {
 
     companion object {
@@ -60,5 +61,6 @@ class InstallAborted(
         const val ABORT_CREATE = 5
         const val ABORT_WRITE = 6
         const val ABORT_INFO = 7
+        const val ABORT_FAILURE = 8
     }
 }

@@ -166,14 +166,17 @@ class InstallLaunch : FragmentActivity() {
     }
 
     private fun showDialogInner(newDialog: DialogFragment?) {
+        if (fragmentManager.isDestroyed) return
         val currentDialog = fragmentManager.findFragmentByTag("dialog") as DialogFragment?
         if (currentDialog is BaseDialogFragment && newDialog is BaseDialogFragment
             && currentDialog.mDialogData.stageCode == newDialog.mDialogData.stageCode
         ) {
             return
         }
-        currentDialog?.dismissAllowingStateLoss()
-        newDialog?.show(fragmentManager, "dialog")
+        val transaction = fragmentManager.beginTransaction()
+        currentDialog?.let(transaction::remove)
+        newDialog?.let { transaction.add(it, "dialog") }
+        transaction.commitAllowingStateLoss()
     }
 
     private fun isOptionsIntent(intent: Intent): Boolean =

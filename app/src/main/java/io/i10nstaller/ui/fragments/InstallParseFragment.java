@@ -42,7 +42,10 @@ public class InstallParseFragment extends DialogFragment {
     @Override
     public void onStart() {
         super.onStart();
-        mDialog.getButton(DialogInterface.BUTTON_NEGATIVE).setEnabled(false);
+        var cancelButton = mDialog.getButton(DialogInterface.BUTTON_NEGATIVE);
+        cancelButton.setFocusable(true);
+        cancelButton.setClickable(true);
+        cancelButton.setEnabled(false);
     }
 
 }

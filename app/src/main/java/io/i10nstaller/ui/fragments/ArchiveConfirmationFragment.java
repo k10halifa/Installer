@@ -22,6 +22,12 @@ public class ArchiveConfirmationFragment extends BaseDialogFragment {
         mDialogData = dialogData;
     }
 
+    @Override
+    public void onStart() {
+        super.onStart();
+        focusPositiveButtonForDpad();
+    }
+
     @NonNull
     @Override
     public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {

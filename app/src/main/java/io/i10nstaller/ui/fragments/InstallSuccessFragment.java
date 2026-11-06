@@ -11,7 +11,6 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import io.i10nstaller.R;
-import io.i10nstaller.model.Hook;
 import io.i10nstaller.model.InstallSuccess;
 
 public class InstallSuccessFragment extends BaseDialogFragment {
@@ -39,7 +38,7 @@ public class InstallSuccessFragment extends BaseDialogFragment {
                 (dialog, which) -> cleanAndFinish())
             .setPositiveButton(R.string.launch, (dialog, which) -> {
                 cleanAndFinish();
-                Hook.INSTANCE.startActivity(mDialogData.getStartIntent());
+                requireActivity().startActivity(mDialogData.getStartIntent());
             })
             .create();
         return mDialog;

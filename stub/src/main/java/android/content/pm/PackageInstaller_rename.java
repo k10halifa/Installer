@@ -4,7 +4,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 
 public class PackageInstaller_rename {
-    public static String EXTRA_LEGACY_STATUS = "android.content.pm.extra.LEGACY_STATUS";
+    public static final String EXTRA_LEGACY_STATUS = "android.content.pm.extra.LEGACY_STATUS";
 
     public static class SessionParams {
         public int mode;
