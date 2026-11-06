@@ -23,6 +23,11 @@ public class ArchiveConfirmationFragment extends BaseDialogFragment {
     }
 
     @Override
+    protected boolean shouldHandleConfirmationDpadKeys() {
+        return true;
+    }
+
+    @Override
     public void onStart() {
         super.onStart();
         focusPositiveButtonForDpad();
