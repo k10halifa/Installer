@@ -18,21 +18,12 @@ import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.ViewModelProvider
 import io.i10nstaller.R
 import io.i10nstaller.model.InstallAborted
-import io.i10nstaller.model.InstallFailed
-import io.i10nstaller.model.InstallInstalling
 import io.i10nstaller.model.InstallOptions
 import io.i10nstaller.model.InstallStage
-import io.i10nstaller.model.InstallSuccess
 import io.i10nstaller.model.InstallUserAction
-import io.i10nstaller.model.PackageUserAction
-import io.i10nstaller.ui.fragments.ArchiveConfirmationFragment
 import io.i10nstaller.ui.fragments.BaseDialogFragment
-import io.i10nstaller.ui.fragments.InstallConfirmationFragment
 import io.i10nstaller.ui.fragments.InstallErrorFragment
-import io.i10nstaller.ui.fragments.InstallFailedFragment
-import io.i10nstaller.ui.fragments.InstallInstallingFragment
-import io.i10nstaller.ui.fragments.InstallParseFragment
-import io.i10nstaller.ui.fragments.InstallSuccessFragment
+import io.i10nstaller.ui.fragments.InstallFlowDialogFragment
 import io.i10nstaller.viewmodel.InstallViewModel
 import java.lang.reflect.Constructor
 
@@ -93,15 +84,13 @@ class InstallLaunch : FragmentActivity() {
                     showDialogInner(null)
                     finish()
                 } else {
-                    val errorDialog = InstallErrorFragment(aborted)
-                    showDialogInner(errorDialog)
+                    showInstallStageDialog(installStage)
                 }
             }
 
             InstallStage.Companion.STAGE_PARSE -> {
                 if (!silentApkInstall) {
-                    val parseDialog = InstallParseFragment()
-                    showDialogInner(parseDialog)
+                    showInstallStageDialog(installStage)
                 }
             }
 
@@ -120,8 +109,7 @@ class InstallLaunch : FragmentActivity() {
                         )
                     }
                 } else {
-                    val actionDialog = InstallConfirmationFragment(uar)
-                    showDialogInner(actionDialog)
+                    showInstallStageDialog(uar)
                 }
             }
 
@@ -130,16 +118,12 @@ class InstallLaunch : FragmentActivity() {
                     failSilentInstall()
                     return
                 }
-                val archive = installStage as PackageUserAction
-                val archiveDialog = ArchiveConfirmationFragment(archive)
-                showDialogInner(archiveDialog)
+                showInstallStageDialog(installStage)
             }
 
             InstallStage.Companion.STAGE_INSTALLING -> {
                 if (!silentApkInstall) {
-                    val installing = installStage as InstallInstalling
-                    val installingDialog = InstallInstallingFragment(installing)
-                    showDialogInner(installingDialog)
+                    showInstallStageDialog(installStage)
                 }
             }
 
@@ -148,9 +132,7 @@ class InstallLaunch : FragmentActivity() {
                     finishSilentInstall()
                     return
                 }
-                val success = installStage as InstallSuccess
-                val successDialog = InstallSuccessFragment(success)
-                showDialogInner(successDialog)
+                showInstallStageDialog(installStage)
             }
 
             InstallStage.Companion.STAGE_FAILED -> {
@@ -158,11 +140,22 @@ class InstallLaunch : FragmentActivity() {
                     failSilentInstall()
                     return
                 }
-                val failed = installStage as InstallFailed
-                val failureDialog = InstallFailedFragment(failed)
-                showDialogInner(failureDialog)
+                showInstallStageDialog(installStage)
             }
         }
+    }
+
+    private fun showInstallStageDialog(stage: InstallStage) {
+        if (fragmentManager.isDestroyed) return
+        val currentDialog = fragmentManager.findFragmentByTag("dialog")
+        if (currentDialog is InstallFlowDialogFragment) {
+            currentDialog.updateStage(stage)
+            return
+        }
+        val transaction = fragmentManager.beginTransaction()
+        currentDialog?.let(transaction::remove)
+        transaction.add(InstallFlowDialogFragment(stage), "dialog")
+        transaction.commitNowAllowingStateLoss()
     }
 
     private fun showDialogInner(newDialog: DialogFragment?) {

@@ -136,7 +136,8 @@ public class BaseDialogFragment extends DialogFragment {
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (negativeButton != null && negativeButton.isEnabled()) {
+                if (negativeButton != null && negativeButton.isEnabled()
+                    && !negativeButton.isInTouchMode()) {
                     negativeButton.requestFocus();
                 }
                 return true;
@@ -144,7 +145,7 @@ public class BaseDialogFragment extends DialogFragment {
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (positiveButton.isEnabled()) {
+                if (positiveButton.isEnabled() && !positiveButton.isInTouchMode()) {
                     positiveButton.requestFocus();
                 }
                 return true;

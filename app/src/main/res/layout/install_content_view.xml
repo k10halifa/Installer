@@ -68,7 +68,7 @@
             android:layout_height="wrap_content"
             android:indeterminate="true"
             android:paddingTop="8dp"
-            android:visibility="gone" />
+            android:visibility="invisible" />
 
     </LinearLayout>
 </ScrollView>
